@@ -10,4 +10,5 @@ A collection of TamperMonkey automation scripts for incremental/idle games.
 # Other authors
 
 Cookie Clicker - [play](http://orteil.dashnet.org/cookieclicker/) - [Cookie Monster](https://github.com/Aktanusa/CookieMonster)
+
 Cookie Clicker - [play](http://orteil.dashnet.org/cookieclicker/) - [agronomicon](https://bitbucket.org/Acharvak/cookie-clicker-agronomicon/)
