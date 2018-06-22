@@ -671,9 +671,13 @@ function doGoals() {
 			var item = scGoals[project][goal];
 			if (Object.keys(item.cost).every(function(res) {
 				if (!contains(unlockedResources, res) || res == "science" || res == "rocketFuel") {return false;}
-				if (scResources[res].maxStorage() >= item.cost[res]() &&
-					scInStorage(res, scReserved.item)+(scPs(res, scReserved.item)*900) >= item.cost[res]()
-					) { return true; }
+				// Do we need to buy storage?
+				if (scInStorage(res, scReserved.item) >= scResources[res].maxStorage()) {
+					scBuyStorage(res);
+				// Can the item be bought in 15 minutes or less of production?
+				} else if (scInStorage(res, scReserved.item)+(scPs(res, scReserved.item)*900) >= item.cost[res]()) {
+					return true;
+				}
 				return false;
 			})) {
 				scReserved.item = goal;
