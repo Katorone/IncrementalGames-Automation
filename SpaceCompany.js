@@ -609,8 +609,7 @@ function clickResources() {
 		if (scResources[res].ps() < (gainNum*100)) {
 			var doClick = true;
 			if (res == "plasma") {
-				if (scResources.plasma.inStorage() >= 1000 ||
-					scResources.energy.inStorage() < 1000*gainNum ||
+				if (scResources.energy.inStorage() < 1000*gainNum ||
 					scResources.hydrogen.inStorage() < 10*gainNum ||
 					scResources.plasma.ps()>1) {doClick = false;}
 			} else if (res == "meteorite") {
