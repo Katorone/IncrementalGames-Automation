@@ -65,13 +65,29 @@ function unlocksChanged() {
 		return false;
 	}
 }
+// Utility : set ScReserved
+function scReserveItem(machine, machineObj) {
+	if (typeof machine == 'undefined') {
+		scReserved = {};
+		scReserved.item = "";
+		scReserved.name = "";
+		scReserved.cost = {};
+		scReserved.input = {};
+		scReserved.override = false;
+	} else if (scReserved.item == "") {
+		scReserved.item = machine;
+		scReserved.name = machineObj.name;
+		scReserved.cost = machineObj.cost;
+		scReserved.input = machineObj.input;
+	}
+}
 // Utility : Calculate resources we can spend
 // 'machine' is optional, when a machine name is provided that's in scReserved
 // the actual amount of resources is returned
 unsafeWindow.scInStorage = function(material, machine) {
 	if (!contains(unlockedResources, material)) {return 0;}
 	var inStorage = getResource(material);
-	if (!scReserved.override && scReserved.item != machine && (material in scReserved.cost)) {
+	if (scReserved.item != "" && !scReserved.override && scReserved.item != machine && (material in scReserved.cost)) {
 		inStorage -= scReserved.cost[material]();
 	}
 	if (inStorage == 0) {inStorage = 0.0000000001;}
@@ -83,14 +99,28 @@ unsafeWindow.scInStorage = function(material, machine) {
 unsafeWindow.scPs = function(material, machine) {
 	if (!contains(unlockedResources, material)) {return 0;}
 	var ps = Function("return "+material+"ps;")();
-	// After solCenter is available, create an energy buffer
-	if (material == "energy" && contains(resourcesUnlocked, "solCenter")) {
-		ps = ps - scResources.energy.maxStorage()/1000;
-	} else if (!scReserved.override && (scReserved.item != machine) && (material in scReserved.input)) {
+	// Create an energy buffer, 10% of all energy produced
+	// After a dyson sphere has been built, this is replaced by 10%
+	// of all dyson stuff. Energy is important for EMC
+	if (material == "energy") {
+		ps -= scCalcEnergyReserve();
+	} else if (scReserved.item != "" && !scReserved.override &&
+			  (scReserved.item != machine) && (material in scReserved.input)) {
 		ps -= scReserved.input[material]();
 	}
-	if (ps == 0) {ps = 0.0000000001;} else {ps = parseInt(ps);}
-	return ps;
+	return parseInt(ps);
+}
+// Calculates the energy we should keep in reserve
+unsafeWindow.scCalcEnergyReserve = function() {
+	var min = 0;
+	if (sphere>0) {
+		min = 100000*sphere + 2500*swarm + 500*ring;
+	} else {
+		scResources.energy.machines.forEach(function(machine) {
+			min += (scMachines[machine].count() * scMachines[machine].output.energy() * 0.05);
+		})
+	}
+	return min;
 }
 // Update the title nav bar to mention the reserved machine
 function scUpdateNavBar(machine) {
@@ -98,11 +128,60 @@ function scUpdateNavBar(machine) {
 	var text = "Goal: "+machine
 	if (node) {
 		node.innerText = text;
+		node.title = scCrumbs.join(", ");
 	} else {
 		node = document.querySelector('div.navbar-header');
 		node.insertAdjacentHTML('beforeend', '<span id="scReserved" class="navbar-brand text-muted small">'+text+'</span>');
 	}
+	if (contains(unlockedResources, 'energy')) {
+		var node = document.getElementById("energyNav");
+		if (node) {node.title = "Energy Production: "+parseInt(scResources.energy.ps()+scCalcEnergyReserve())+" - Buffer: "+parseInt(scCalcEnergyReserve())+" - Usable: "+parseInt(scResources.energy.ps());}
+	}
 }
+// Lists all costs to complete all goals.
+// Then sorts them from high to low, returns an array of materials
+// filterCompleted = true, will discount the current storage level of these materials
+function scSortGoalCosts(filterCompleted) {
+	var resources = {};
+	scReserved.override = true;
+	Object.keys(scGoals).forEach(project => Object.keys(scGoals[project]).forEach(goal => Object.keys(scGoals[project][goal].cost).forEach(function(material) {
+		// Make sure we can produce this material already
+		if (contains(unlockedResources, material)) {
+			// Examine the costs
+			var cost = 0;
+			if (filterCompleted) { cost = Math.max(0, scGoals[project][goal].cost[material]() - scResources[material].inStorage()); }
+			// Examine production
+			var ps = scResources[material].ps();
+			if (ps == 0) { cost = Infinity; } else { cost = cost/ps; }
+			// Add the material to the list
+			if (!(material in resources) || resources[material]<cost) { resources[material] = cost; }
+		}
+	})))
+	scReserved.override = false;
+	// sort highest to lowest
+	var needed = []
+	needed = Object.keys(resources).sort(function(a, b) { return resources[a] < resources[b] })
+	return needed;
+}
+// Filter Method - Filters a list of resources on full storage
+function scFilterFullResource(resource) {
+	if (scInStorage(resource, scReserved.item) >= scResources[resource].maxStorage()) {
+		return false;
+	}
+	return true;
+}
+// Translates an array of resources into an array of best machines
+// Best being the machine with highest RoI
+function scResources2BestMachines(needed) {
+	var cost = 0;
+	var machines = [];
+	needed.forEach(function(resource) {
+		var roi = scBestRoiMachines(resource);
+		machines = machines.concat(roi[0]);
+	})
+	return machines;
+}
+
 
 //
 //	Core
@@ -110,6 +189,7 @@ function scUpdateNavBar(machine) {
 // Try to buy a machine
 function scBuyMachine(machine) {
 	// Can we afford buying the machine
+	if (contains(unlockedMachines, scReserved) && scReserved.item == machine) {scReserved.override = true;}
 	if (!scAffordableMachine(machine)) {return false;}
 	// Can we supply the machine?
 	if (!scSupplyableMachine(machine)) {return false;}
@@ -118,12 +198,15 @@ function scBuyMachine(machine) {
 		var count = scMachines[machine].count();
 		scMachines[machine].buy();
 		if (count < scMachines[machine].count()) {
+			scReserved.override = false;
 			var mat = Object.keys(scMachines[machine].output)[0];
+			if (contains(unlockedMachines, scReserved.item) && machine == scReserved.item) {scReserveItem();}
 			scLog("-- Bought machine: "+scMachines[machine].name+" ("+capitalize(mat)+": "+scMachines[machine].output[mat]()+")");
 			scNotify("Bought machine: "+scMachines[machine].name+" ("+capitalize(mat)+": "+scMachines[machine].output[mat]()+")");
 			return true;
 		}
 	}
+	scReserved.override = false;
 	return false;
 }
 // Do we have enough resources stored to buy?
@@ -135,7 +218,7 @@ function scAffordableMachine(machine) {
 // Do we have enough production to supply?
 function scSupplyableMachine(machine) {
 	return !Object.keys(scMachines[machine].input).some(
-		res => scPs(res, machine) < scMachines[machine].input[res]()
+		res => scPs(res, machine) <= scMachines[machine].input[res]()
 	);
 }
 // Filter to remove batteries/PSU from an array of machines
@@ -150,12 +233,14 @@ function scRemoveNonBatteries(machine) {
 		res => scMachines[machine].output[res]() == 0
 	)
 }
-// Find the machine with the best RoI.
-function scSortRoiMachine(resource) {
+// Finds all machines producing resource, and returns an ordered
+// array from best to worst to buy
+function scBestRoiMachines(resource) {
 	var result = [];
-    result = scResources[resource].machines.sort(function(a, b) {
-    	return scMachines[a].output[resource]() / scCalcEmcValue(a) <
-    	       scMachines[b].output[resource]() / scCalcEmcValue(b)
+	result = scResources[resource].machines;
+    result = result.sort(function(a, b) {
+    	return (scMachines[a].output[resource]() / scCalcEmcValue(a)) <
+    	       (scMachines[b].output[resource]() / scCalcEmcValue(b))
     })
     return result;
 }
@@ -172,67 +257,35 @@ function scCalcEmcValue(machine) {
 // Try to buy storage
 function scBuyStorage(resource) {
     scLog("-- Checking if we can buy storage for: "+resource);
+	if (scSimulate) {return false;}
 	if (resource == "science" || resource == "rocketFuel") {return true;}
 	// handle energy & plasma
 	if (resource == "energy" || resource == "plasma") {
-		var bat = scSortRoiMachine(resource).filter(scRemoveNonBatteries);
-		if (bat.length > 0) { return scBuyMachine(bat[0]); }
-		return true;
+		var bat = scBestRoiMachines(resource).filter(scRemoveNonBatteries);
+		bat = bat[0];
+		// If we have no batteries yet, avoid locks.
+		if (!bat) { return true; }
+		if (scBuyMachine(bat)) {
+			if (scReserved.item == "Storage") { scReserveItem(); }
+			return true;
+		}
+		return false;
 	}
 	if (!(resource in scStorage)) {return true;}
 	// handle the rest
-	if (!scSimulate &&
-    	Object.keys(scStorage[resource].cost).every(
+	if (Object.keys(scStorage[resource].cost).every(
     		mat => scInStorage(mat, scReserved.item) >= scStorage[resource].cost[mat]()
     	)) {
+		// We can buy storage
         scStorage[resource].buy();
+        if (scReserved.item == "Storage") { scReserveItem(); }
         scNotify("Bought storage for "+capitalize(resource));
         scLog("-- Bought 5storage for "+capitalize(resource));
         return true;
     }
     return false;
 }
-// Find the highest amount needed of a resource to fill a goal
-// filter is optional, returns an object {'material': amount} of all matches
-// science can only be gotten through the filter.
-function scFindHighestGoalExpense(filter) {
-	var needed = {};
-	var cost = 0;
-	scReserved.override = true;
-	Object.keys(scGoals).forEach(project => Object.keys(scGoals[project]).forEach(goal => Object.keys(scGoals[project][goal].cost).forEach(function(material) {
-		// Apply filter
-		if (contains(unlockedResources, material) && 
-			(typeof filter == 'undefined' || material == filter) && 
-			(material != 'science' && filter != 'science')) {
-			// Examine the costs
-			cost = scGoals[project][goal].cost[material]();
-			// Don't add the material:
-			// If inStorage > cost, storage is full, storage can be filled in 1 minute
-			if (!(material in needed) || needed[material]<cost) {
-				if ((scResources[material].inStorage()+scResources[material].ps()*60) < scResources[material].maxStorage()) {
-					needed[material] = cost;
-				}
-			}
-		}
-	})))
-	scReserved.override = false;
-	return needed;
-}
-// Fetches the highest resources needed to buy a goal
-// Then translates this to a list of machines
-function scFindHighestGoalExpenseMachines() {
-	var needed = {};
-	var cost = 0;
-	needed = scFindHighestGoalExpense();
-	// replace the array with an array of the best machines to buy
-	var machines = {};
-	Object.keys(needed).forEach(function(resource) {
-		machines[scSortRoiMachine(resource)[0]] = needed[resource];
-	})
-	// sort highest to lowest
-	machines = Object.keys(machines).sort(function(a, b) { return machines[a] < machines[b] })
-	return machines;
-}
+
 function scFindLowestMachineAmount() {
 	var needed = {};
 	for (var machine of unlockedMachines) {
@@ -244,6 +297,36 @@ function scFindLowestMachineAmount() {
 	// sort lowest to highest
 	needed = Object.keys(needed).sort(function(a, b) { return needed[a] > needed[b] })
 	return needed[0];
+}
+// Convert energy/plasma into materials
+function scEmConversion(resource, notify) {
+	if (contains(resourcesUnlocked, "solCenter")) {
+		if (contains(resourcesUnlocked, "emcPage") && 
+			contains(unlockedFilteredResources, resource) && 
+		    scResources.energy.inStorage() > (scResources.energy.maxStorage()/2)) {
+			emcAmount = Math.min((scResources.energy.inStorage()*0.9)/scResources[resource].EmcVal(),
+					 			  scResources[resource].maxStorage() - scResources[resource].inStorage()
+								)
+			emcAmount = parseInt(emcAmount);
+			if (!scSimulate && emcAmount) {
+				convertEnergy(resource, notify);
+				scLog("-- Converted energy to "+resource);
+				return true;
+			}				
+		}
+		if (contains(resourcesUnlocked, "meteoriteEMC") && resource == 'meteorite') {
+			emcAmount = Math.min((scResources.plasma.inStorage()-10000)/scResources.meteorite.EmcVal(),
+								 scResources.meteorite.maxStorage() - scResources.meteorite.inStorage()
+								)
+			emcAmount = parseInt(emcAmount);
+			if (!scSimulate && emcAmount) {
+				convertPlasma('meteorite', false)
+				scLog("-- Converted plasma to meteorite");
+				return true;
+			}
+		}
+	}
+	return false;
 }
 //
 //	Data Collection
@@ -376,6 +459,8 @@ function buildUnlockedStorage () {
 		if (document.getElementById(res + "StorageCost")||false) {
 			// Add costs
 			scStorage[res].cost = {};
+			scStorage[res].input = {};
+			scStorage[res].name = capitalize(res)+" Storage";
 			scStorage[res].cost[res] = Function("return "+scResources[res].maxStorage()*storagePrice+";");
 			resources.forEach(function(res2) {
 				if (document.getElementById(res + "Storage" + capitalize(res2) + "Cost")||false) {
@@ -416,17 +501,21 @@ function buildResearchGoals() {
 // Solar System - solarSystemTab
 function buildSolarSystemGoals() {
 	scLog("-GOALS- Populating Solar System Goals.");
-	if (contains(tabsUnlocked, "solarSystemTab") === true) {
+	if (contains(tabsUnlocked, "solarSystemTab")) {
 		if (rocketLaunched === false) {
 			scGoals.solar = {};
 			scGoals.solar.rocket = {};
 			// Build a rocket?
 			if (rocket === 0) {
+				scGoals.solar.rocket.name = "Build a rocket."
 				scGoals.solar.rocket.cost = {metal: Function("return 1200;"), gem: Function("return 900;"), oil: Function("return 1000;")};
+				scGoals.solar.rocket.input = {};
 				scGoals.solar.rocket.buy = Function("getRocket();");
 			} else {
 				// try to launch the rocket
+				scGoals.solar.rocket.name = "Launch a rocket."
 				scGoals.solar.rocket.cost = {rocketFuel: Function("return 20;")};
+				scGoals.solar.rocket.input = {};
 				scGoals.solar.rocket.buy = Function("return launchRocket();");
 			}
 		} else {
@@ -437,6 +526,8 @@ function buildSolarSystemGoals() {
 			unlockedPlanets.forEach(function(planet) {
 				// moonRocketFuelCost.textContent*1
 				scGoals.solar[planet] = {};
+				scGoals.solar[planet].name = "Explore "+planet;
+				scGoals.solar[planet].input = {};
 				scGoals.solar[planet].cost = {rocketFuel: Function("return "+unsafeWindow[planet+"RocketFuelCost"].textContent*1+";")};
 				scGoals.solar[planet].buy = Function("return explore('"+capitalize(planet)+"');");
 			})
@@ -474,7 +565,9 @@ function buildWonderGoals() {
 			wonder.forEach(function(w) {
 				var wonderId = w.id;
 				scGoals.wonders[wonderId] = {};
+				scGoals.wonders[wonderId].name = wonderId;
 				scGoals.wonders[wonderId].cost = {};
+				scGoals.wonders[wonderId].input = {};
 				// Extract the variables for the material costs
 				var costs = w.querySelectorAll('span')
 				if (costs.length > 0) {
@@ -509,7 +602,9 @@ function buildSolCenterGoals() {
 		if (divs.length > 0) {
 			// unlock research
 			scGoals.solCenter[techpane.id] = {};
+			scGoals.solCenter[techpane.id].name = techpane.id;
 			scGoals.solCenter[techpane.id].cost = {};
+			scGoals.solCenter[techpane.id].input = {};
 			divs.forEach(function(techcost) {
 				// techcost.id = researchEmc
 				techcost.querySelectorAll('span[id]').forEach(function(costspan) {
@@ -530,7 +625,8 @@ function buildSolCenterGoals() {
 	var cost = {};
 	// Calculate the cost of a ring (50 segments)
 	// The goal is to build 2x the amount of rings than swarms
-	if (ring == 0 || ring < swarm*2 || ring > 100) {
+	// Don't bother when meteorite is less than 24ps
+	if ((ring == 0 || ring < swarm*2 || ring > 100) && scResources.meteorite.ps() >= 24) {
 		mats.forEach(m => cost[m] = 0);
 		Object.keys(basecost).forEach(function(m) {
 			for (var i = 0; i < 50; i++) {
@@ -551,7 +647,7 @@ function buildSolCenterGoals() {
 	}
 	// Calculate the cost of a swarm (100 segments)
 	// Only enable the swarm when the amount of rings is at least 2*swarms
-	if (ring != 0 && swarm <= 2*ring || ring > 50) {
+	if ((ring != 0 && swarm <= 2*ring || ring > 50) && scResources.meteorite.ps() >= 50) {
 		cost = {};
 		mats.forEach(m => cost[m] = 0);
 		Object.keys(basecost).forEach(function(m) {
@@ -573,7 +669,7 @@ function buildSolCenterGoals() {
 	}
 	// Calculate the cost of a sphere (250 segments)
 	// Only enable when we have 10 swarms
-	if (sphere <= Game.interstellar.stars.systemsConquered && swarm >= 20) {
+	if ((sphere <= Game.interstellar.stars.systemsConquered && swarm >= 20) && scResources.meteorite.ps() >= 100) {
 		cost = {};
 		mats.forEach(m => cost[m] = 0);
 		Object.keys(basecost).forEach(function(m) {
@@ -609,13 +705,22 @@ function clickResources() {
 		if (scResources[res].ps() < (gainNum*100)) {
 			var doClick = true;
 			if (res == "plasma") {
+				// Click plasma if we have
+				//  - More than 1000 energy
+				//  - More than 10 hydrogen
+				//  - It doesn't bring us under 20k energy
+				//  - Plasma per second is lower than 1, unless energy is full
 				if (scResources.energy.inStorage() < 1000*gainNum ||
 					scResources.hydrogen.inStorage() < 10*gainNum ||
-					scResources.plasma.ps()>1) {doClick = false;}
+					scResources.energy.inStorage() < 20000 + 1000*gainNum ||
+					(scResources.plasma.ps()>=1 &&
+					 scResources.energy.inStorage() < (scResources.energy.maxStorage()*0.95))
+				   ) {doClick = false;}
 			} else if (res == "meteorite") {
-				if (scResources.plasma.inStorage() < 3*gainNum ||
-					scResources.meteorite.inStorage() >= 10000 ||
-					contains(resourcesUnlocked, "meteoriteEMC")) {doClick = false;}
+				if (contains(resourcesUnlocked, "meteoriteEMC") ||
+					scResources.plasma.inStorage() < 3*gainNum ||
+					scResources.plasma.inStorage() < 10000 ||
+					scResources.meteorite.inStorage() >= 10000) {doClick = false;}
 			} else if (contains(["charcoal","energy","rocketFuel","science"], res)) {
 				doClick = false;
 			}
@@ -626,34 +731,21 @@ function clickResources() {
 
 // Do EM Conversion
 function doEMconversion() {
-	if (contains(resourcesUnlocked, "solCenter")) {
-		if (contains(resourcesUnlocked, "emcPage")) {
-			// sort unlockedFilteredResources on inStorage
-			unlockedFilteredResources = unlockedFilteredResources.sort(function(a, b) {
-				return scResources[a].inStorage() - scResources[b].inStorage();
-			})
-			// convert energy to the resources in lowest reserve
-			if (!scSimulate) {
-				if (!('energy' in scReserved.cost)) {convertEnergy(unlockedFilteredResources[0])};
-				scLog("-- Converted energy to "+unlockedFilteredResources[0]);
-			}
-		}
-		if (contains(resourcesUnlocked, "meteoriteEMC")) {
-			if (!scSimulate) {
-				if (!('plasma' in scReserved.cost)) {convertPlasma('meteorite')};
-				scLog("-- Converted plasma to meteorite");
-			}
-		}
-	}
+	var unsorted = {}; var sorted = []; var needed = "";
+	unlockedFilteredResources.forEach(
+		res => unsorted[res] = (scResources[res].maxStorage()-scResources[res].inStorage())/scPs(res, scReserved.item)
+	)
+	sorted = Object.keys(unsorted).sort(function(a, b) {
+		return (unsorted[a] < unsorted[b])
+	})
+	var needed = sorted[0];
+	// convert energy to the slowest/least productive resource
+	scEmConversion(needed, true);
+	// Try meteorite as well
+	scEmConversion('meteorite', true);
 }
 // Solve towards goals
 function doGoals() {
-	scReserved = {};
-	scReserved.item = "";
-	scReserved.name = "";
-	scReserved.cost = {};
-	scReserved.input = {};
-	scReserved.override = false;
 	// Try to buy a goal
 	if (Object.keys(scGoals).some(
 		project => Object.keys(scGoals[project]).some(function(goal) {
@@ -665,34 +757,39 @@ function doGoals() {
 		})
 	)) { return true; }
 	// No goal bought, check if maxStorage can complete a goal in a reasonable time (15min)
-	if (Object.keys(scGoals).some(
+	Object.keys(scGoals).some(
+		// Loop through the goals in a project (tab)
 		project => Object.keys(scGoals[project]).some(function(goal) {
 			var item = scGoals[project][goal];
+			// Loop through the costs of each goal
 			if (Object.keys(item.cost).every(function(res) {
+				// Get rid of unknown resources, also science & rocketfuel which don't have storage
 				if (!contains(unlockedResources, res) || res == "science" || res == "rocketFuel") {return false;}
 				// Do we need to buy storage?
-				if (scInStorage(res, scReserved.item) >= scResources[res].maxStorage()) {
-					scBuyStorage(res);
+				if (scResources[res].inStorage() >= scResources[res].maxStorage() && 
+					scResources[res].inStorage() < item.cost[res]()) {
+					if (!scBuyStorage(res)) {
+						// Couldn't buy storage, reserve the resources of the storage we need
+						scReserveItem();
+						scReserveItem("Storage", scStorage[res]);
+					}
 				// Can the item be bought in 15 minutes or less of production?
-				} else if (scInStorage(res, scReserved.item)+(scPs(res, scReserved.item)*900) >= item.cost[res]()) {
-					return true;
-				}
+				} else if (scResources[res].inStorage()+(scResources[res].ps()*900) >= item.cost[res]() &&
+					       item.cost[res]() <= scResources[res].maxStorage()) { return true; }
 				return false;
 			})) {
-				scReserved.item = goal;
-				scReserved.name = goal;
-				scReserved.cost = scGoals[project][goal].cost;
-				if ("input" in scGoals[project][goal]) {
-					scReserved.input = scGoals[project][goal].input;
-				}
-				scUpdateNavBar(scReserved.name);
+				scReserveItem();
+				scReserveItem(goal, scGoals[project][goal])
 				return true;
 			} else {return false;}
 		})
-	)) { return true; }
+	)
+	return false;
 }
 // Try to buy a goal
 function buyGoal(item, goal) {
+	// Reset the reserved item after it's been bought.
+	if (scReserved.item == goal) { scReserveItem(); }
 	if (!scSimulate) {
 		scLog("-Goal- bought: "+goal);
 		scNotify("-Goal- bought: "+goal);
@@ -703,84 +800,122 @@ function buyGoal(item, goal) {
 }
 // Create a path for the highest needed resource.
 function generateBreadcrumbs() {
-	// Clear scDisarded
+	// Clear scDiscarded
 	scDiscarded = [];
-	// Find the best machines for most needed resources to complete goals
+	// Get a list of most needed resources to buy a goal
 	var needed = [];
-	// needed = scFindHighestGoalExpenseMachines();
-	needed = scFindHighestGoalExpenseMachines();
-	//console.log("Needed for goals: "+needed)
+	needed = needed.concat(scSortGoalCosts(true).filter(scFilterFullResource));
+	// Find the best machines for most needed resources to complete Goals
+	// Remove science, add it to the end
+	if (contains(needed, 'science')) {
+		needed = needed.filter(res => res != 'science');
+		needed.push('science');
+	}
+	// If meteorite or plasma is needed, put them in front
+	if (contains(needed, 'meteorite')) { needed.unshift('meteorite'); }
+	if (contains(needed, 'plasma')) { needed.unshift('plasma'); }
+	var machines = [];
+	machines = machines.concat(scResources2BestMachines(needed));
 	// If there are no goals, buy an extra machine for achievements
-	if (needed.length == 0) {needed = [scFindLowestMachineAmount()];}
-	//console.log("Needed Crumbs: "+needed)
-	// Try to find a path to buy the found machines
+	if (machines.length === 0) {machines.push(scFindLowestMachineAmount())}
+	// Record the path to buy the found machines
 	scCrumbs = [];
-	// We want to buy the cheapest research in 15 minutes time
-	// Unless the cheapest research is less than 10,000 (early game)
-	var cheapest = 0; cheapest = Infinity;
-	if ('tech' in scGoals) {
-		Object.keys(scGoals.tech).forEach(function(project) {
-			if (scGoals.tech[project].cost.science() < cheapest) {
-				cheapest = scGoals.tech[project].cost.science()
+	// Keep 10% of energy produced in reserve
+	// This energy can be used up, the reserve is there to more easily
+	// buy machines that produce energy generation resources
+	if (contains(unlockedResources, 'energy')) {
+		// scCalcEnergyReserve returns 5% of production
+		if (scResources.energy.ps() < Math.max(10, scCalcEnergyReserve())) {
+			machines = scBestRoiMachines('energy').filter(scRemoveBatteries);
+		}
+	}
+	// For all machines, check if we can already supply them
+	// prepend producers to the list of machines if not.
+	//console.log("Need to buy: "+machines)
+	var newmachines = [];
+	machines.forEach(function(machine) {
+		Object.keys(scMachines[machine].input).forEach(function(input) {
+			if (scResources[input].ps() < scMachines[machine].input[input]()) {
+				newmachines.push(scBestRoiMachines(input)[0]);
 			}
 		})
-		if ((cheapest < 10000 && scResources.science.ps() * 60 < cheapest) ||
-			scResources.science.ps() * 900 < cheapest) {
-			needed.unshift(scSortRoiMachine('science')[0]);
-		}
+		newmachines.push(machine);
+	})
+	machines = newmachines;
+	if (contains(unlockedMachines, scReserved.item)) {
+		machines.unshift(scReserved.item);
 	}
-	// If energy is lower than 0.0002 of max (excl reserve), increase energy
-	if (contains(unlockedResources, 'energy')) {
-		var limit = scResources.energy.maxStorage()/5000;
-		if (scResources.energy.ps() < limit) {
-			needed = [scSortRoiMachine('energy').filter(scRemoveBatteries)[0]];
-		}
-	}
+	// Remove doubles
+	machines = machines.filter(function(elem, index, self) { return index === self.indexOf(elem); })
 	// Try to buy stuff.
-	//console.log("Need to buy: "+needed)
-	if (needed.some(machine => followBreadcrumbs(machine))) {return true;}
+	//console.log("Need to buy: "+machines)
+	//console.log("----------------------");
+	scReserved.topLevel = machines;
+	if (machines.some(machine => followBreadcrumbs(machine, 0))) { return true; }
+	if (unlockedResources.some(function(resource) {
+		if (scResources[resource].inStorage() >= scResources[resource].maxStorage()) {
+			return scBuyStorage(resource);
+		} else { return false; }
+	})) { return true; }
 	return false;
 }
-var scCrumbs = [];
+
+unsafeWindow.scCrumbs = [];
 // Follow the crumbs
-function followBreadcrumbs(machine) {
+function followBreadcrumbs(machine, level) {
 	if (contains(scDiscarded, machine)) {return false;}
 	if (machine.length == 0) {return false;}
-	// Try to buy the machine
-	scCrumbs.push(machine);
-	// Override the reserved check for these procedures, only if it's not a scGoal
-	if (contains(unlockedMachines, scReserved.item)) {scReserved.override = true;}
-	if (scBuyMachine(machine)) {return true;}
-	// The machine couldn't be bought.
 	// Blacklist the resources required to buy & supply this machine.
-	if (scReserved.item == "") {
-		scReserved.item = machine;
-		scReserved.name = scMachines[machine].name;
-		scReserved.cost = scMachines[machine].cost;
-		scReserved.input = scMachines[machine].input;
-		scUpdateNavBar(scReserved.name);
+	scReserveItem(machine, scMachines[machine]);
+	scReserved.override = false;
+	// Try to buy the machine
+	scCrumbs.push(machine+" ("+level+")");
+	// Do we ignore the scReserved for our next purchase?
+	var output = Object.keys(scMachines[machine].output)[0];
+	var ps = scResources[output].ps();
+	if (contains(unlockedMachines, scReserved.item)) {
+		// machine output is input for reserved and is needed to supply it
+		if (output in scReserved.input && ps <= scReserved.input[output]()) {
+			scReserved.override = true;
+		// machine output is cost for reserved machine. And new ps would be > +1%
+		} else if (output in scReserved.cost && ps/(ps+scMachines[machine].output[output]()) >= 0.001) {
+			scReserved.override = true;
+		// machine output is an energy input, or is science or energy
+		} else if (contains(scEnergyInput, output) || output == 'science' || output == 'energy') {
+			scReserved.override = true;
+		}
 	}
+	// Try to buy the machine
+	//console.log("Trying to buy: "+machine+" - Reserve overridden: "+scReserved.override);
+	if (scBuyMachine(machine)) {scReserved.override = false; return true;}
+	scReserved.override = false;
 	var needed = [];
 	// Do we need more supply to buy the machine?
 	var storage = [];
 	if (!scSupplyableMachine(machine)) {
 		// We need to increase one of the supplied materials
 		needed = needed.concat(Object.keys(scMachines[machine].input).filter(function(mat) {
+			// if input.ps >= resource.ps, add to needed (have at least 1ps reserve)
+			if (scMachines[machine].input[mat]() >= parseInt(scResources[mat].ps())) {return true;}
 			// Ignore this material if storage is full, buy storage instead
-			if (scInStorage(mat, scReserved.item) >= scResources[mat].maxStorage()) {storage.push(mat) ; return false;}
-			if (scMachines[machine].input[mat]() > scResources[mat].ps()) {return true;}
+			if (scInStorage(mat, scReserved.item) >= scResources[mat].maxStorage()) {storage.push(mat)}
 			return false;
 		}))
 	}
 	// Do we need more resources to buy the machine?
 	if (!scAffordableMachine(machine)) {
-		// If we can't reach the goal in 60 seconds, buy more production
-		needed = needed.concat(Object.keys(scMachines[machine].cost).filter(function(mat) {
-			// Ignore this material if storage is full, buy storage instead
-			if (scInStorage(mat, scReserved.item) >= scResources[mat].maxStorage()) {storage.push(mat) ; return false;}
-			if ((scMachines[machine].cost[mat]() > scResources[mat].inStorage()+(scResources[mat].ps()*60))) {return true;}
-			return false;
-		}))
+		// Create a list of all needed resources and only handle the most needed one
+		var costs = Object.keys(scMachines[machine].cost);
+		costs = costs.sort(function(a, b) {
+			return (scMachines[machine].cost[a]() - scInStorage(a, scReserved.item))/scPs(a, scReserved.item) <
+			       (scMachines[machine].cost[b]() - scInStorage(b, scReserved.item))/scPs(b, scReserved.item)
+		})
+		scEmConversion(costs[0], true)
+		needed.push(costs[0]);
+		// Do we need storage?
+		costs.forEach(function(mat) {
+			if (scInStorage(mat, scReserved.item) >= scResources[mat].maxStorage()) {storage.push(mat)}
+		})
 	}
 	// Buy the storage we need
 	if (storage.length > 0) {
@@ -790,39 +925,47 @@ function followBreadcrumbs(machine) {
     	})
     	if (storage.some(mat => scBuyStorage(mat))) {return true;}
 	}
-	scReserved.override = false;
 	// Add the current examined machine to scDiscarded to avoid a recheck
 	scDiscarded.push(machine);
 	// Translate the needed resources to machines
 	var machines = [];
+	//console.log("needed: "+needed)
 	needed.forEach(function(resource) {
-		var tmp = scSortRoiMachine(resource)
+		var tmp = scBestRoiMachines(resource)
 		machines = machines.concat(tmp.filter(function(machine) {
+			// Machine is already in the toplevel
+			if (contains(scReserved.topLevel, machine)) { return false; }
 			// Machine is the best we can buy
 			if (machine == tmp[0]) { return true; }
 			// Machine produces energy
 			if (resource == 'energy') { return true; }
+			// Machine produces plasma while plasma < 10ps
+			//if (resource == 'plasma' && scResources.plasma.ps() < 10) { return true; }
 			// Machine is needed to supply an energy producer
 			if (contains(scEnergyInput, resource)) { return true; }
 			// Resource's output is less than 1ps
 			if (scResources[resource].ps() < 1) { return true; }
 			// Machine doesn't use energy as input
-			if (!('energy' in scMachines[machine].input)) { return true; }
+			if (!('energy' in scMachines[machine].input)) {return true;}
+			// If production of resource would increase with more than 0.1%
+			if (resource in scReserved.cost && scResources[resource].ps()/(scResources[resource].ps()+scMachines[machine].output[resource]()) >= 0.001 &&
+			// and it takes longer than 120 seconds to reach the cost
+				scResources[resource].ps()*120 < scReserved.cost[resource]()) {return true;}
+			scDiscarded.push(tmp[0]);
 			return false;
-		}))
+			// Remove batteries & discarded from the list
+		}).filter(scRemoveBatteries).filter(m => !contains(scDiscarded, m)))
 	})
-	// Remove batteries & discarded from the list
-	machines = machines.filter(scRemoveBatteries).filter(m => !contains(scDiscarded, m))
 	// remove doubles
 	needed = needed.filter(function(elem, index, self) {
     	return index === self.indexOf(elem);
 	})
 	//console.log("crumbs: "+ scCrumbs);
-	//console.log("Needed machines: "+needed);
+	//console.log("Needed resources: "+needed);
 	//console.log("Discarded: "+scDiscarded);
 	//console.log("Check machines: "+machines)
 	// Try to increase these resources
-	return machines.some(need => followBreadcrumbs(need));
+	return machines.some(need => followBreadcrumbs(need, level+1));
 }
 
 
@@ -835,6 +978,7 @@ unsafeWindow.unlockedMachines = [];
 unsafeWindow.unlockedPlanets = [];
 unsafeWindow.scEnergyInput = [];
 unsafeWindow.scReserved = {};
+scReserveItem();
 unsafeWindow.scDiscarded = [];
 unsafeWindow.scEnergyInput = [];
 unsafeWindow.scResources = {};
@@ -903,19 +1047,20 @@ setTimeout(function() {
     	// Rebuild data if needed
     	scBuildData();
     	// Try to buy a goal
-    	doGoals();
+    	if (doGoals()) {scUpdateNavBar(scReserved.name); return true;}
     	// Try to buy machines to complete goals
     	// - Prioritizes buying energy suppliers
     	// - Tries to buy research to complete the cheapest in 15 minutes
     	// - Loops through goals & tries to buy machines
     	// - Tries to buy supporting machines for supply or resource gain
-    	generateBreadcrumbs();
+    	if (generateBreadcrumbs()) {scUpdateNavBar(scReserved.name); return true;}
+    	scUpdateNavBar(scReserved.name);
     }, 2000); //Check two seconds.
 
     // Slow loop
     var slowLoop = setInterval(function() {
     	// Force rebuild data.
-    	scUnlocks = -1;
+    	scForceRecheck = true;
     	doEMconversion();
     }, 60000); //Check every minute.
 
