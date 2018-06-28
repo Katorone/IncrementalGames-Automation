@@ -6,8 +6,8 @@
 // @author       u/Katorone
 // @match        https://rawgit.com/sparticle999/SpaceCompany/v1test/
 // @match        https://www.kongregate.com/games/sparticle999/space-company
-// @include		 *rawgit.com/sparticle999/SpaceCompany/v1test/*
-// @include	     *kongregate.com/games/sparticle999/space-company*
+// @include      *rawgit.com/sparticle999/SpaceCompany/v1test/*
+// @include      *kongregate.com/games/sparticle999/space-company*
 // @grant        none
 // ==/UserScript==
 
