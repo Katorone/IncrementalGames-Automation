@@ -9,7 +9,13 @@
 // @grant        none
 // ==/UserScript==
 
+// Auto Loot
+// Enable?
+const bot_autoLoot_enabled = true;
+
 // FARMING
+// Enable?
+const bot_autoFarm_enabled = true;
 // Use the highest tier of seeds first?
 const bot_farming_use_highest = true;
 
@@ -69,19 +75,24 @@ const bot_farming_use_highest = true;
 
   function bot_addCompost(area, patch) {
     let required_compost = (100 - farmingAreas[area].patches[patch].compost)/20;
-    if(required_compost > 0) {
+    if (required_compost > 0) {
       let count = bot_getBankCount(CONSTANTS.item.Compost);
       if (count < required_compost) {
         let to_buy = required_compost - count;
         // try to buy compost - Do we have the gold?
         if (gp >= (items[CONSTANTS.item.Compost].buysFor * to_buy)) {
           buyCompost(to_buy);
+          // We want to stop the loop if we bought compost.
+          return true;
         }
       }
       if (count >= required_compost) {
         // Apply compost
         addCompost(area, patch, required_compost);
+        // We want to stop the loop when compost is applied.
+        return true;
       }
+      return false;
     }
   }
 
@@ -110,7 +121,11 @@ const bot_farming_use_highest = true;
           if (seed === -1) {continue;}
           // Do we need to buy compost?
           if (farmingMastery[items[seed].masteryID].mastery < 50) {
-            bot_addCompost(area, patch);
+            let composted = bot_addCompost(area, patch);
+            // check if the area actually got composted
+            if (composted) {
+              return true;
+            }
           }
           bot_plantField(area, patch, seed);
         }
@@ -121,18 +136,29 @@ const bot_farming_use_highest = true;
   var bot_seedsList = [];
   var bot_treeList = [];
 
+  // Delay 10 seconds to allow the game to load.
   setTimeout(function() {
     notifyPlayer(11, "Automation started.");
-    loadSeeds();
-    bot_seedsList = [...allotmentSeeds];
-    bot_treeList = [...treeSeeds];
-    if (bot_farming_use_highest) {
-      bot_seedsList.reverse();
-      bot_treeList.reverse();
+    // Set up the farming data
+    if (bot_autoFarm_enabled) {
+      loadSeeds();
+      bot_seedsList = [...allotmentSeeds];
+      bot_treeList = [...treeSeeds];
+      if (bot_farming_use_highest) {
+        bot_seedsList.reverse();
+        bot_treeList.reverse();
+      }
     }
+    // Do actions every second.
     var mediumLoop = setInterval(function() {
-      lootContainer();
-      tendFields();
+      // Pick up loot, if enabled.
+      if (bot_autoLoot_enabled) {
+        lootContainer();
+      }
+      // Harvest & replant farms, if enabled.
+      if (bot_autoFarm_enabled) {
+        tendFields();
+      }
     }, 1000)
   }, 10000);
 })();
