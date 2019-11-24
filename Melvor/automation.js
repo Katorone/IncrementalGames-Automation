@@ -9,6 +9,12 @@
 // @grant        none
 // ==/UserScript==
 
+// FARMING
+// Use the highest tier of seeds first?
+const bot_farming_use_highest = true;
+
+
+
 'use strict';
 (function() {
 
@@ -54,9 +60,9 @@
 
   function bot_pickSeed(area, patch) {
     if (farmingAreas[area].patches[patch].type === "Allotment") {
-      return bot_findSeed(allotmentSeeds);
+      return bot_findSeed(bot_seedsList);
     } else if (farmingAreas[area].patches[patch].type === "Tree") {
-      return bot_findSeed(treeSeeds);
+      return bot_findSeed(bot_treeList);
     }
     return -1;
   }
@@ -112,9 +118,18 @@
     }
   }
 
+  var bot_seedsList = [];
+  var bot_treeList = [];
+
   setTimeout(function() {
     notifyPlayer(11, "Automation started.");
     loadSeeds();
+    bot_seedsList = [...allotmentSeeds];
+    bot_treeList = [...treeSeeds];
+    if (bot_farming_use_highest) {
+      bot_seedsList.reverse();
+      bot_treeList.reverse();
+    }
     var mediumLoop = setInterval(function() {
       lootContainer();
       tendFields();
