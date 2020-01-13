@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Melvor Idle automation
 // @namespace    Melvor
-// @version      0.09.2
+// @version      0.11
 // @description  Aleviates some of the micro management
 // @author       Katorone
 // @match        https://melvoridle.com/
@@ -28,9 +28,8 @@ const bot_farming_use_highest = true;
 // Gem glove Enable?
 const bot_buyGemGlove_enabled = true;
 // Amount of uses to keep in reserve?
-// Have this larger than 500.
+// Have this larger than 2000.
 const bot_gemGloveUses = 60000;
-
 
 'use strict';
 (function() {
@@ -166,7 +165,7 @@ const bot_gemGloveUses = 60000;
   function tendFields() {
     for (let area = 0; area < farmingAreas.length; area++) {
       // Check if we have the level for this area
-      if (skillLevel[CONSTANTS.skill.Farming] < farmingAreas[i].level) {
+      if (skillLevel[CONSTANTS.skill.Farming] < farmingAreas[area].level) {
         continue;
       }
       for (let patch = 0; patch < farmingAreas[area].patches.length; patch++) {
@@ -202,13 +201,13 @@ const bot_gemGloveUses = 60000;
     if (!glovesTracker[CONSTANTS.shop.gloves.Gems].isActive) {return;}
     // How many uses left?
     let uses_left = glovesTracker[CONSTANTS.shop.gloves.Gems].remainingActions;
-    let to_buy = Math.ceil((bot_gemGloveUses - uses_left)/500)
+    let to_buy = Math.ceil((bot_gemGloveUses - uses_left)/2000)
     // Quit if we don't need more gloves.
     if (to_buy <= 0) {return;}
-    let price = glovesCost[4];
+    let price = glovesCost[CONSTANTS.shop.gloves.Gems];
     // Buy one if we can afford it
     if (gp >= price) {
-      buyGloves(4);
+      buyGloves(CONSTANTS.shop.gloves.Gems);
       return;
     }
     // Do we need to sell gems?
