@@ -9,8 +9,13 @@
 // @grant        none
 // ==/UserScript==
 
-// Auto Loot
-// Enable?
+// BANK
+// How much money to keep on reserve?
+const bot_reserveGold = 10000000;
+
+
+// COMBAT
+// Auto loot Enable?
 const bot_autoLoot_enabled = true;
 
 // FARMING
@@ -19,11 +24,68 @@ const bot_autoFarm_enabled = true;
 // Use the highest tier of seeds first?
 const bot_farming_use_highest = true;
 
+// MINING
+// Gem glove Enable?
+const bot_buyGemGlove_enabled = true;
+// Amount of uses to keep in reserve?
+// Have this larger than 500.
+const bot_gemGloveUses = 60000;
 
 
 'use strict';
 (function() {
 
+// GENERAL
+  function bot_getBankCount(id) {
+    for (let i = 0; i < bank.length; i++) {
+      if (bank[i].id === id) {
+        return bank[i].qty;
+      }
+    }
+    return 0;
+  }
+
+  // Adds an item to the sell list, or merges if it's already queued.
+  function bot_addSellList(id, amount) {
+    for (let i = 0; i < bot_sellList.length; i++) {
+      if (bot_sellList[i][0] === id) {
+        bot_sellList[i][1] += amount;
+        return;
+      }
+    }
+    bot_sellList.push([id, amount]);
+  }
+
+  // Try to sell gems, but keep an equal amount of each in the bank.
+  function bot_sellGems(target_gold) {
+    // Create an easy to navigate structure
+    let bank_gems = [];
+    let to_sell = {};
+    let value = 0;
+    for (let i = 0; i < bot_gemList.length; i++) {
+      let id = bot_gemList[i];
+      let amount = bot_getBankCount(id);
+      bank_gems.push([id, amount, items[id].sellsFor]);
+      to_sell[id] = {};
+      to_sell[id].amount = 0;
+      value = value + (amount * items[id].sellsFor);
+    }
+    // If selling all gems doesn't match target_gold, stop.
+    if (value < target_gold) {return;}
+
+    let sell_value = 0;
+    // Add gems to sell until the target gold is reached
+    while (sell_value < target_gold) {
+      // Sort bank_gems on amount
+      bank_gems.sort(function(a,b) {return a[1] < b[1];})
+      // Sell 1 gem each itteration
+      bank_gems[0][1]--;
+      sell_value = sell_value + bank_gems[0][2];
+      bot_addSellList(bank_gems[0][0], 1)
+    }
+  }
+
+// COMBAT
   function lootContainer() {
     // Get the loot container
     let loot_container = document.getElementById("combat-loot-container");
@@ -36,22 +98,21 @@ const bot_farming_use_highest = true;
     }
   }
 
-  function bot_getBankCount(id) {
-    for (let i = 0; i < bank.length; i++) {
-      if (bank[i].id === id) {
-        return bank[i].qty;
-      }
-    }
-    return 0;
-  }
-
+// FARMING
   function bot_findSeed(col) {
+    // Current farming skill
+    let skill = skillLevel[CONSTANTS.skill.Farming];
     // Loop through available seeds
     for (let i = 0; i < col.length; i++) {
+      // Item id of the seed
       let id = col[i].itemID;
-      let skill = skillLevel[CONSTANTS.skill.Farming];
+      // Required level to use the seed
       let level = col[i].level;
-      let mastery = farmingMastery[items[id].masteryID].mastery;
+      // Current mastery of the seed
+      let mastery = 0;
+      if (farmingMastery.includes(items[id].masteryID)) {
+        mastery = farmingMastery[items[id].masteryID].mastery;
+      }
       // Skill too low
       if (skill < level) { continue; }
       // If mastery is 99, don't use the seed.
@@ -105,7 +166,7 @@ const bot_farming_use_highest = true;
   function tendFields() {
     for (let area = 0; area < farmingAreas.length; area++) {
       // Check if we have the level for this area
-      if (farmingAreas[area].level > skillLevel[CONSTANTS.skill.Farming]) {
+      if (skillLevel[CONSTANTS.skill.Farming] < farmingAreas[i].level) {
         continue;
       }
       for (let patch = 0; patch < farmingAreas[area].patches.length; patch++) {
@@ -133,12 +194,39 @@ const bot_farming_use_highest = true;
     }
   }
 
+// MINING
+  function bot_checkGloves() {
+    // Are we mining? - Do this check to avoid spending saved gp
+    if (!isMining) {return;}
+    // Is the gem glove equipped? - Same reason
+    if (!glovesTracker[CONSTANTS.shop.gloves.Gems].isActive) {return;}
+    // How many uses left?
+    let uses_left = glovesTracker[CONSTANTS.shop.gloves.Gems].remainingActions;
+    let to_buy = Math.ceil((bot_gemGloveUses - uses_left)/500)
+    // Quit if we don't need more gloves.
+    if (to_buy <= 0) {return;}
+    let price = glovesCost[4];
+    // Buy one if we can afford it
+    if (gp >= price) {
+      buyGloves(4);
+      return;
+    }
+    // Do we need to sell gems?
+    if (gp < price) {
+      bot_sellGems(price - gp);
+    }
+  }
+
+  var bot_sellList = [];
   var bot_seedsList = [];
   var bot_treeList = [];
+  var bot_gemList = [128, 129, 130, 131, 132];
 
   // Delay 10 seconds to allow the game to load.
   setTimeout(function() {
+
     notifyPlayer(11, "Automation started.");
+
     // Set up the farming data
     if (bot_autoFarm_enabled) {
       loadSeeds();
@@ -159,6 +247,24 @@ const bot_farming_use_highest = true;
       if (bot_autoFarm_enabled) {
         tendFields();
       }
+      // Does anything need selling?
+      let sell = bot_sellList.shift();
+      if (sell) {
+        sellItem(getBankId(sell[0]), sell[1]);
+      }
     }, 1000)
+
+    // Do actions every minute.
+    var slowLoop = setInterval(function() {
+      // Make sure our money reserves are replenished
+      if (gp < bot_reserveGold) {
+        bot_sellGems(bot_reserveGold - gp);
+      }
+      // One gem glove lasts at least 750 seconds.
+      if (bot_buyGemGlove_enabled) {
+        bot_checkGloves();
+      }
+    }, 60000)
+
   }, 10000);
 })();
