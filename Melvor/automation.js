@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Melvor Idle automation
 // @namespace    Melvor
-// @version      0.11
+// @version      0.12
 // @description  Aleviates some of the micro management
 // @author       Katorone
 // @match        https://melvoridle.com/
@@ -9,20 +9,43 @@
 // @grant        none
 // ==/UserScript==
 
+//
+// Options - Feel free to change these.
+//
+
 // BANK
 // How much money to keep on reserve?
+// Aim for at least 4.000.000 when also buying bank slots
 const bot_reserveGold = 10000000;
-
+// Sell Bobby's pocket automatically?
+const bot_sellGoldBags = true;
+// Buy new Bank slots when needed?
+// Careful with this setting, this can drain your money fast in early game.
+const bot_buyBankSlots = true;
 
 // COMBAT
 // Auto loot Enable?
 const bot_autoLoot_enabled = true;
+
+// Opening containers automatically will display a popup.
+// The script tries to close this popup automatically, but this might
+// interrupt other actions you're doing in the bank.
+// Sadly there's no real way around this.
+
+// Open bird nests automatically?
+const bot_farming_openBirdNests = true;
+// Open herb bags automatically?
+const bot_farming_openHerbBags = true;
+
 
 // FARMING
 // Enable?
 const bot_autoFarm_enabled = true;
 // Use the highest tier of seeds first?
 const bot_farming_use_highest = true;
+// Auto buy new allotments?
+const bot_farming_autoBuyAllotments = true;
+
 
 // MINING
 // Gem glove Enable?
@@ -30,6 +53,12 @@ const bot_buyGemGlove_enabled = true;
 // Amount of uses to keep in reserve?
 // Have this larger than 2000.
 const bot_gemGloveUses = 60000;
+
+
+//
+// Code - You probably won't need to change anything here.
+//   If you need to, feel free to poke me on the Melvor Discord.
+//
 
 'use strict';
 (function() {
@@ -116,7 +145,7 @@ const bot_gemGloveUses = 60000;
       if (skill < level) { continue; }
       // If mastery is 99, don't use the seed.
       if (mastery >= 99) { continue; }
-      // 3 or more seeds in the bank?
+      // Enough seeds in the bank to plant once?
       if (bot_getBankCount(id) < items[id].seedsRequired) { continue; }
       // Pick the first seed that matches the requirements
       return id;
@@ -125,16 +154,18 @@ const bot_gemGloveUses = 60000;
   }
 
   function bot_pickSeed(area, patch) {
-    if (farmingAreas[area].patches[patch].type === "Allotment") {
+    if (newFarmingAreas[area].areaName === "Allotments") {
       return bot_findSeed(bot_seedsList);
-    } else if (farmingAreas[area].patches[patch].type === "Tree") {
+    } else if (newFarmingAreas[area].areaName === "Herbs") {
+      return bot_findSeed(bot_herbsList);
+    } else if (newFarmingAreas[area].areaName === "Trees") {
       return bot_findSeed(bot_treeList);
     }
     return -1;
   }
 
   function bot_addCompost(area, patch) {
-    let required_compost = (100 - farmingAreas[area].patches[patch].compost)/20;
+    let required_compost = (100 - newFarmingAreas[area].patches[patch].compost)/20;
     if (required_compost > 0) {
       let count = bot_getBankCount(CONSTANTS.item.Compost);
       if (count < required_compost) {
@@ -163,22 +194,33 @@ const bot_gemGloveUses = 60000;
   }
 
   function tendFields() {
-    for (let area = 0; area < farmingAreas.length; area++) {
-      // Check if we have the level for this area
-      if (skillLevel[CONSTANTS.skill.Farming] < farmingAreas[area].level) {
-        continue;
-      }
-      for (let patch = 0; patch < farmingAreas[area].patches.length; patch++) {
+    for (let area = 0; area < newFarmingAreas.length; area++) {
+      for (let patch = 0; patch < newFarmingAreas[area].patches.length; patch++) {
+        // If the patch isn't unlocked, try to unlock it.
+        if (newFarmingAreas[area].patches[patch].unlocked === false) {
+          // Auto buy if this option is enabled
+          if (bot_farming_autoBuyAllotments === true && 
+              gp >= newFarmingAreas[area].patches[patch].cost && 
+              skillLevel[CONSTANTS.skill.Farming] >= newFarmingAreas[area].patches[patch].level
+          ) {
+            unlockPlot(area, patch);
+            // Stop the script so the game can update.
+            return true;
+          }
+          // Following patches would be locked, so break out of this loop.
+          break;
+        }
         // There's a seed planted
-        if (farmingAreas[area].patches[patch].seedID != 0) {
-          if (farmingAreas[area].patches[patch].hasGrown) {
+        if (newFarmingAreas[area].patches[patch].seedID != 0) {
+          if (newFarmingAreas[area].patches[patch].hasGrown) {
             harvestSeed(area, patch);
           }
         // No seed planted
         } else {
           // Check available seeds
           let seed = bot_pickSeed(area, patch);
-          if (seed === -1) {continue;}
+          // Can't find a seed, proceed to the next area
+          if (seed === -1) {break;}
           // Do we need to buy compost?
           if (farmingMastery[items[seed].masteryID].mastery < 50) {
             let composted = bot_addCompost(area, patch);
@@ -218,8 +260,12 @@ const bot_gemGloveUses = 60000;
 
   var bot_sellList = [];
   var bot_seedsList = [];
+  var bot_herbsList = [];
   var bot_treeList = [];
   var bot_gemList = [128, 129, 130, 131, 132];
+  const bot_birdsNest = 119;
+  const bot_herbsBag = 620;
+  const bot_goldBag = 482;
 
   // Delay 10 seconds to allow the game to load.
   setTimeout(function() {
@@ -230,9 +276,11 @@ const bot_gemGloveUses = 60000;
     if (bot_autoFarm_enabled) {
       loadSeeds();
       bot_seedsList = [...allotmentSeeds];
+      bot_herbsList = [...herbSeeds];
       bot_treeList = [...treeSeeds];
       if (bot_farming_use_highest) {
         bot_seedsList.reverse();
+        bot_herbsList.reverse();
         bot_treeList.reverse();
       }
     }
@@ -255,6 +303,44 @@ const bot_gemGloveUses = 60000;
 
     // Do actions every minute.
     var slowLoop = setInterval(function() {
+      // Try buying a bank slot
+      if (bot_buyBankSlots === true && 
+          bank.length >= (baseBankMax + bankMax)) {
+        let cost = Math.min(newNewBankUpgradeCost.level_to_gp(currentBankUpgrade+1), 4000000);
+        // Buy if we have enough gold.
+        if (gp >= cost) {
+          upgradeBank();
+          // Stop script to let the game update.
+          return true;
+        }
+      }
+      // Sell Bobbys pocket
+      if (bot_sellGoldBags === true) {
+        let c = bot_getBankCount(bot_goldBag);
+        if (c > 0) {bot_addSellList(bot_goldBag, c);}
+      }
+      // Open bird nests
+      if (bot_farming_openBirdNests === true) {
+        let c = bot_getBankCount(bot_birdsNest);
+        if (c > 0) {
+          openBankItem(getBankId(bot_birdsNest), bot_birdsNest, true)
+          // Close the popup
+          setTimeout(function() {
+            document.getElementsByClassName("swal2-confirm")[0].click();
+          }, 100);
+        }
+      }
+      // Open herb sacks
+      if (bot_farming_openHerbBags === true) {
+        let c = bot_getBankCount(bot_herbsBag);
+        if (c > 0) {
+          openBankItem(getBankId(bot_herbsBag), bot_herbsBag, true)
+          // Close the popup
+          setTimeout(function() {
+            document.getElementsByClassName("swal2-confirm")[0].click();
+          }, 100);
+        }
+      }
       // Make sure our money reserves are replenished
       if (gp < bot_reserveGold) {
         bot_sellGems(bot_reserveGold - gp);
