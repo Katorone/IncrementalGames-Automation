@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Melvor Idle automation
 // @namespace    Melvor
-// @version      0.12.00.01 (for Melvor 0.12)
+// @version      0.12.00.011 (for Melvor 0.12)
 // @description  Aleviates some of the micro management
 // @author       Katorone
 // @match        https://melvoridle.com/
@@ -133,15 +133,7 @@ const bot_gemGloveUses = 60000;
 
 // COMBAT
   function lootContainer() {
-    // Get the loot container
-    let loot_container = document.getElementById("combat-loot-container");
-    // Get loot
-    if (loot_container) {
-      let buttons = loot_container.querySelectorAll('button');
-      if (buttons && buttons.length > 0) {
-        buttons[0].click();
-      }
-    }
+    lootAll();
   }
 
 // FARMING
