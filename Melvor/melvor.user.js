@@ -3,11 +3,23 @@
 // @namespace    Melvor
 // @version      0.12.00.012 (for Melvor 0.12)
 // @description  Aleviates some of the micro management
+// @downloadURL  https://github.com/Katorone/IncrementalGames-Automation/raw/master/Melvor/melvor.user.js
 // @author       Katorone
 // @match        https://melvoridle.com/
 // @include      https://melvoridle.com/*
 // @grant        none
+// @run-at       document-idle
 // ==/UserScript==
+
+// How to use:
+// - Get Tampermonkey: https://www.tampermonkey.net/
+// - Follow the steps on the page for your browser to install it.
+// - On the Git page: https://github.com/Katorone/IncrementalGames-Automation/edit/master/Melvor/melvor.user.js
+//   click the 'Raw'-button (located right above the text area)
+// - Tampermonkey should now ask if you wish to install/update this script.
+// After installing, updating or changing any configuration values,
+// ALWAYS reload the game's page.
+
 
 //
 // Options - Feel free to change these.
