@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Melvor Idle automation
 // @namespace    Melvor
-// @version      0.12.00.013 (for Melvor 0.12)
+// @version      0.12.00.02 (for Melvor 0.12)
 // @description  Aleviates some of the micro management
 // @downloadURL  https://github.com/Katorone/IncrementalGames-Automation/raw/master/Melvor/melvor.user.js
 // @author       Katorone
@@ -34,6 +34,8 @@
 //    - Only replant what you've manually planted, until running out of seeds.
 //      Setting this to true will ignore the 'bot_seeds_use_highest'-setting.
 //  - Fields will get composted when needed (mastery < 50)
+//  - When 99 mastery is reached in a seed, it will not be used for lowest/higher
+//    tier planting any more.  Use replanting in this case.
 //  - Buy farming areas when they become available. (if money is available)
 //  - Sell Bobbys pockets automatically (regardless of gold reserves, see below)
 //  - Buy more bank slots when the bank is full, and there's enough gold.
@@ -48,6 +50,8 @@
 //    - Farming areas
 //    This is a design choice because Melvor has many ways to earn gold.
 //    Gems are also used for crafting, meaning we don't want to sell them all the time.
+//  - Automatically bury bones, while keeping a reserve for crafting.
+
 
 //
 // Options - Feel free to change these.
@@ -115,6 +119,22 @@ const bot_buyGemGlove_enabled = true;
 // Amount of uses to keep in reserve?
 // Have this larger than 2000.
 const bot_gemGloveUses = 60000;
+
+// PRAYER
+// Bury bones?
+const bot_buryBones_enabled = true;
+// Amount of bones to keep in reserve?
+// 21.600 bones is enough for 12h of crafting.
+// - Normal bones
+const bot_bonesReserve = 21600;
+// - Dragon bones
+const bot_dragonBonesReserve = 21600;
+// - Magic bones
+const bot_magicBonesReserve = 0;
+// - Holy dust
+const bot_holyDustReserve = 21600;
+// - Big bones
+const bot_bigBonesReserve = 0;
 
 
 //
@@ -332,11 +352,39 @@ const bot_gemGloveUses = 60000;
     }
   }
 
+  function bot_checkBones(b = 0) {
+    if (b < bot_bones.length) {
+      let boneId = bot_bones[b][0];
+      let keep = bot_bones[b][1];
+      let inBank = bot_getBankCount(boneId);
+      let bury = inBank - keep;
+      // The code allows us to bypass the 10 bones minimum,
+      // but let's not cheat.
+      if (inBank > 10) {
+        buryItem(getBankId(boneId), boneId, bury);
+      }
+      // Delay checking the next bone, so the bank can update.
+      // bankIds shift when all of an item is sold.
+      setTimeout(bot_checkBones(b+1),100);
+    }
+  }
+
   var bot_sellList = [];
+  var bot_buryList = [];
   var bot_seedsList = [];
   var bot_herbsList = [];
   var bot_treeList = [];
   var bot_gemList = [128, 129, 130, 131, 132];
+  var bot_bones = [
+    [439, bot_bonesReserve],
+    [440, bot_dragonBonesReserve],
+    [441, bot_magicBonesReserve],
+    [500, bot_holyDustReserve],
+    [506, bot_bigBonesReserve]
+  ];
+//  addItemToBank(439, 30000, false, false); addItemToBank(440, 30000, false, false); addItemToBank(441, 30000, false, false); addItemToBank(500, 30000, false, false); addItemToBank(506, 30000, false, false);
+
+
   const bot_birdsNest = 119;
   const bot_herbsBag = 620;
   const bot_goldBag = 482;
@@ -436,6 +484,10 @@ const bot_gemGloveUses = 60000;
       // One gem glove lasts at least 750 seconds.
       if (bot_buyGemGlove_enabled) {
         bot_checkGloves();
+      }
+      // Bury bones.
+      if (bot_buryBones_enabled) {
+        bot_checkBones();
       }
     }, 60000)
 
