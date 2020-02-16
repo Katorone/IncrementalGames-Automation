@@ -14,7 +14,7 @@
 // How to use:
 // - Get Tampermonkey: https://www.tampermonkey.net/
 // - Follow the steps on the page for your browser to install it.
-// - On the Git page: https://github.com/Katorone/IncrementalGames-Automation/edit/master/Melvor/melvor.user.js
+// - On the Git page: https://github.com/Katorone/IncrementalGames-Automation/blob/master/Melvor/melvor.user.js
 //   click the 'Raw'-button (located right above the text area)
 // - Tampermonkey should now ask if you wish to install/update this script.
 // After installing, updating or changing any configuration values,
