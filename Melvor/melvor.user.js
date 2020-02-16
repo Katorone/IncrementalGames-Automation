@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Melvor Idle automation
 // @namespace    Melvor
-// @version      0.12.00.012 (for Melvor 0.12)
+// @version      0.12.00.013 (for Melvor 0.12)
 // @description  Aleviates some of the micro management
 // @downloadURL  https://github.com/Katorone/IncrementalGames-Automation/raw/master/Melvor/melvor.user.js
 // @author       Katorone
@@ -20,6 +20,34 @@
 // After installing, updating or changing any configuration values,
 // ALWAYS reload the game's page.
 
+// What it does:
+//  All features are optional.
+//  Feel free to change the settings below to your liking.
+//  - Auto loot during combat, even when on a different page.
+//  - Auto buy gem gloves, automatically selling gems to pay for them.
+//    Unequipping the gem gloves will stop the script from buying more.
+//    Keep a comfortable amount of uses in reserve to avoid having to grind
+//    for gold after spending all of it on upgrades.
+//  - Auto tending fields.  Seeds, herbs and trees can be configured to:
+//    - Plant the lowest tier seed first (bot_seeds_use_highest = false)
+//    - Plant the highest tier seed first (bot_seeds_use_highest = true)
+//    - Only replant what you've manually planted, until running out of seeds.
+//      Setting this to true will ignore the 'bot_seeds_use_highest'-setting.
+//  - Fields will get composted when needed (mastery < 50)
+//  - Buy farming areas when they become available. (if money is available)
+//  - Sell Bobbys pockets automatically (regardless of gold reserves, see below)
+//  - Buy more bank slots when the bank is full, and there's enough gold.
+//  - Open birds nests and herb bags.
+//  - Keep a configurable amount of gold in reserve.
+//    Setting this amount to 0 will effectively disable the automatic top-up.
+//    Keep in mind that this script only automatically sells gems to pay for Gem Gloves
+//    All other expenses are paid from the reserves in the bank.
+//    This inclodes:
+//    - Bank slots
+//    - Compost
+//    - Farming areas
+//    This is a design choice because Melvor has many ways to earn gold.
+//    Gems are also used for crafting, meaning we don't want to sell them all the time.
 
 //
 // Options - Feel free to change these.
@@ -56,9 +84,9 @@ const bot_autoFarm_enabled = true;
 // Auto buy new allotments?
 const bot_farming_autoBuyAllotments = true;
 // Planting options
-//  only_replant : The bot will only replant what's planted, 
+//  only_replant : The bot will only replant what's planted,
 //                 until it runs out of seeds.
-//  use_highest : the bot will plant the highest 
+//  use_highest : the bot will plant the highest
 //                or lowest tier seed that isn't mastered yet.
 //  When only_replant is true, use_highest is ignored.
 // - Normal seeds
@@ -76,6 +104,10 @@ const bot_trees_use_highest = false;
 // is assigned to each plot, until the next harvest.
 // This allows players to reassign plots freely by destroying seeds and
 // planting something manually.
+
+// In the early game, I'd suggest planting the highest tier you can.
+// With enough mastery, plants give more seeds than you're using, at which
+// point you can opt to replant.  This avoids you having to thieve/fight for more.
 
 // MINING
 // Gem glove Enable?
@@ -125,8 +157,9 @@ const bot_gemGloveUses = 60000;
       let amount = bot_getBankCount(id);
       bank_gems.push([id, amount, items[id].sellsFor]);
       to_sell[id] = {};
-      to_sell[id].amount = 0;
-      value = value + (amount * items[id].sellsFor);
+      // Little hack to always keep 1 gem in the bank.
+      to_sell[id].amount = -1;
+      value = value + ((amount-1) * items[id].sellsFor);
     }
     // If selling all gems doesn't match target_gold, stop.
     if (value < target_gold) {return;}
@@ -136,7 +169,7 @@ const bot_gemGloveUses = 60000;
     while (sell_value < target_gold) {
       // Sort bank_gems on amount
       bank_gems.sort(function(a,b) {return b[1] - a[1];})
-      // Sell 1 gem each itteration
+      // Add gems to the selling queue
       bank_gems[0][1]--;
       sell_value = sell_value + bank_gems[0][2];
       bot_addSellList(bank_gems[0][0], 1)
@@ -239,8 +272,8 @@ const bot_gemGloveUses = 60000;
         // If the patch isn't unlocked, try to unlock it.
         if (newFarmingAreas[area].patches[patch].unlocked === false) {
           // Auto buy if this option is enabled
-          if (bot_farming_autoBuyAllotments === true && 
-              gp >= newFarmingAreas[area].patches[patch].cost && 
+          if (bot_farming_autoBuyAllotments === true &&
+              gp >= newFarmingAreas[area].patches[patch].cost &&
               skillLevel[CONSTANTS.skill.Farming] >= newFarmingAreas[area].patches[patch].level
           ) {
             unlockPlot(area, patch);
@@ -281,7 +314,7 @@ const bot_gemGloveUses = 60000;
     // Are we mining? - Do this check to avoid spending saved gp
     if (!isMining) {return;}
     // Is the gem glove equipped? - Same reason
-    if (!glovesTracker[CONSTANTS.shop.gloves.Gems].isActive) {return;}
+    if (equippedItems[CONSTANTS.equipmentSlot.Gloves] !== CONSTANTS.item.Mining_Gloves) {return;}
     // How many uses left?
     let uses_left = glovesTracker[CONSTANTS.shop.gloves.Gems].remainingActions;
     let to_buy = Math.ceil((bot_gemGloveUses - uses_left)/2000)
@@ -359,7 +392,7 @@ const bot_gemGloveUses = 60000;
     // Do actions every minute.
     var slowLoop = setInterval(function() {
       // Try buying a bank slot
-      if (bot_buyBankSlots === true && 
+      if (bot_buyBankSlots === true &&
           bank.length >= (baseBankMax + bankMax)) {
         let cost = Math.min(newNewBankUpgradeCost.level_to_gp(currentBankUpgrade+1), 4000000);
         // Buy if we have enough gold.
