@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Melvor Idle automation
 // @namespace    Melvor
-// @version      0.12.00.02 (for Melvor 0.12)
+// @version      0.12.00.021 (for Melvor 0.12)
 // @description  Aleviates some of the micro management
 // @downloadURL  https://github.com/Katorone/IncrementalGames-Automation/raw/master/Melvor/melvor.user.js
 // @author       Katorone
@@ -10,6 +10,9 @@
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
+
+// TODO : Equip farming cape for saving gp on composting
+
 
 // How to use:
 // - Get Tampermonkey: https://www.tampermonkey.net/
@@ -360,7 +363,7 @@ const bot_bigBonesReserve = 0;
       let bury = inBank - keep;
       // The code allows us to bypass the 10 bones minimum,
       // but let's not cheat.
-      if (inBank > 10) {
+      if (inBank > 10 && bury > 0) {
         buryItem(getBankId(boneId), boneId, bury);
       }
       // Delay checking the next bone, so the bank can update.
@@ -370,7 +373,6 @@ const bot_bigBonesReserve = 0;
   }
 
   var bot_sellList = [];
-  var bot_buryList = [];
   var bot_seedsList = [];
   var bot_herbsList = [];
   var bot_treeList = [];
@@ -382,8 +384,6 @@ const bot_bigBonesReserve = 0;
     [500, bot_holyDustReserve],
     [506, bot_bigBonesReserve]
   ];
-//  addItemToBank(439, 30000, false, false); addItemToBank(440, 30000, false, false); addItemToBank(441, 30000, false, false); addItemToBank(500, 30000, false, false); addItemToBank(506, 30000, false, false);
-
 
   const bot_birdsNest = 119;
   const bot_herbsBag = 620;
@@ -423,7 +423,7 @@ const bot_bigBonesReserve = 0;
     // Do actions every second.
     var mediumLoop = setInterval(function() {
       // Pick up loot, if enabled.
-      if (bot_autoLoot_enabled) {
+      if (bot_autoLoot_enabled && isInCombat === true) {
         lootContainer();
       }
       // Harvest & replant farms, if enabled.
