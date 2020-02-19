@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Melvor Idle automation
 // @namespace    Melvor
-// @version      0.12.00.03 (for Melvor 0.12.2)
+// @version      0.12.00.031 (for Melvor 0.12.2)
 // @description  Aleviates some of the micro management
 // @downloadURL  https://github.com/Katorone/IncrementalGames-Automation/raw/master/Melvor/melvor.user.js
 // @author       Katorone
@@ -128,6 +128,7 @@ const bot_buyGemGlove_enabled = true;
 // Amount of uses to keep in reserve?
 // Have this larger than 2000.
 const bot_gemGloveUses = 60000;
+
 
 // PRAYER
 // Bury bones?
@@ -373,7 +374,7 @@ const bot_bigBonesReserve = 0;
     // Are we mining? - Do this check to avoid spending saved gp
     if (!isMining) {return;}
     // Is the gem glove equipped? - Same reason
-    if (equippedItems[CONSTANTS.equipmentSlot.Gloves] !== CONSTANTS.item.Mining_Gloves) {return;}
+    if (equippedItems[CONSTANTS.equipmentSlot.Gloves] !== CONSTANTS.item.Gem_Gloves) {return;}
     // How many uses left?
     let uses_left = glovesTracker[CONSTANTS.shop.gloves.Gems].remainingActions;
     let to_buy = Math.ceil((bot_gemGloveUses - uses_left)/2000)
@@ -513,7 +514,18 @@ const bot_bigBonesReserve = 0;
       if (bot_buryBones_enabled) {
         bot_checkBones();
       }
+      /* Convenience for Daedalus
+      let knightLoot = [63, 64, 65, 66, 71, 72, 73, 74, 79, 80, 81, 82, 134, 135, 136, 137, 87, 88, 89, 90, 95, 96, 97, 98, 104, 105];
+      for (let i = 0; i < knightLoot.length; i++) {
+        let c = bot_getBankCount(knightLoot[i]);
+        if (c > 0) {
+          bot_addSellList(knightLoot[i], c)
+        }
+      }
+      */
     }, 60000)
 
   }, 10000);
 })();
+
+
