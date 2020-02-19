@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Melvor Idle automation
 // @namespace    Melvor
-// @version      0.12.00.021 (for Melvor 0.12)
+// @version      0.12.00.03 (for Melvor 0.12.2)
 // @description  Aleviates some of the micro management
 // @downloadURL  https://github.com/Katorone/IncrementalGames-Automation/raw/master/Melvor/melvor.user.js
 // @author       Katorone
@@ -10,9 +10,6 @@
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
-
-// TODO : Equip farming cape for saving gp on composting
-
 
 // How to use:
 // - Get Tampermonkey: https://www.tampermonkey.net/
@@ -31,14 +28,12 @@
 //    Unequipping the gem gloves will stop the script from buying more.
 //    Keep a comfortable amount of uses in reserve to avoid having to grind
 //    for gold after spending all of it on upgrades.
-//  - Auto tending fields.  Seeds, herbs and trees can be configured to:
-//    - Plant the lowest tier seed first (bot_seeds_use_highest = false)
-//    - Plant the highest tier seed first (bot_seeds_use_highest = true)
-//    - Only replant what you've manually planted, until running out of seeds.
-//      Setting this to true will ignore the 'bot_seeds_use_highest'-setting.
+//  - Auto tending fields.
+//    Seeds, herbs and trees can be configured to be planted by base XP,
+//    mastery, farming level or to replant what's there.
 //  - Fields will get composted when needed (mastery < 50)
-//  - When 99 mastery is reached in a seed, it will not be used for lowest/higher
-//    tier planting any more.  Use replanting in this case.
+//  - When 99 mastery is reached in a seed, it will be ignored for auto planting.
+//    Use replanting in this case.
 //  - Buy farming areas when they become available. (if money is available)
 //  - Sell Bobbys pockets automatically (regardless of gold reserves, see below)
 //  - Buy more bank slots when the bank is full, and there's enough gold.
@@ -63,7 +58,7 @@
 // BANK
 // How much money to keep on reserve?
 // Aim for at least 4.000.000 when also buying bank slots
-const bot_reserveGold = 10000000;
+const bot_reserveGold = 5000000;
 // Sell Bobbys pocket automatically?
 const bot_sellGoldBags = true;
 // Buy new Bank slots when needed?
@@ -91,21 +86,32 @@ const bot_autoFarm_enabled = true;
 // Auto buy new allotments?
 const bot_farming_autoBuyAllotments = true;
 // Planting options
-//  only_replant : The bot will only replant what's planted,
-//                 until it runs out of seeds.
-//  use_highest : the bot will plant the highest
-//                or lowest tier seed that isn't mastered yet.
-//  When only_replant is true, use_highest is ignored.
+var bot_plant = {
 // - Normal seeds
-const bot_seeds_only_replant = false;
-const bot_seeds_use_highest = true;
+  'Allotments': {
+//   Type, pick one (case sensitive):
+//   - "mastery": sorts the seeds according to mastery in them
+//   - "tier": sorts the seeds according to their unlock tier
+//   - "xp": plants the seed which gives the most base XP/hour.
+//           This doesn't take extra harvest(-xp) due to mastery in account.
+//   - "replant":  only replants what is manually planted.
+    'type': "mastery",
+//   Sorting order, pick between (case sensitive):
+//   - "ascending" : from low to high
+//   - "descending": from high to low
+    'order': "descending"
+  },
 // - Herb seeds
-const bot_herbs_only_replant = true;
-const bot_herbs_use_highest = true;
+  'Herbs': {
+    'type': "mastery",
+    'order': "ascending"
+  },
 // - Tree seeds
-const bot_trees_only_replant = false;
-const bot_trees_use_highest = false;
-
+  'Trees': {
+    'type': "xp",
+    'order': "descending"
+  }
+};
 // When replant is enabled, the script will remember what is harvested
 // and will try to replant.  Once replanted, it will forget which seed
 // is assigned to each plot, until the next harvest.
@@ -117,7 +123,7 @@ const bot_trees_use_highest = false;
 // point you can opt to replant.  This avoids you having to thieve/fight for more.
 
 // MINING
-// Gem glove Enable?
+// Enable automatic buying of Gem gloves?
 const bot_buyGemGlove_enabled = true;
 // Amount of uses to keep in reserve?
 // Have this larger than 2000.
@@ -242,39 +248,62 @@ const bot_bigBonesReserve = 0;
   }
 
   function bot_pickSeed(area, patch) {
-    if (newFarmingAreas[area].areaName === "Allotments") {
-      if (bot_seeds_only_replant === false) {
-        return bot_findSeed(bot_seedsList);
-      }
-    } else if (newFarmingAreas[area].areaName === "Herbs") {
-      if (bot_herbs_only_replant === false) {
-        return bot_findSeed(bot_herbsList);
-      }
-    } else if (newFarmingAreas[area].areaName === "Trees") {
-      if (bot_trees_only_replant === false) {
-        return bot_findSeed(bot_treeList);
-      }
+    let type = newFarmingAreas[area].areaName;
+    if (bot_plant[type]["type"]==="replant") {
+      return bot_findStoredSeed(area, patch);
     }
-    return bot_findStoredSeed(area, patch);
+    if (bot_plant[type]["type"]==="xp") {
+      // Default sort on base XP/h, highest -> lowest timeToGrow
+      bot_plant[type]["seeds"].sort((a, b) => 
+        (items[b.itemID].farmingXP / items[b.itemID].timeToGrow) -
+        (items[a.itemID].farmingXP / items[a.itemID].timeToGrow)
+      );
+    }
+    if (bot_plant[type]["type"]==="tier") {
+      // Default sort on tier, highest -> lowest
+      bot_plant[type]["seeds"].sort((a, b) => items[b.itemID].farmingLevel - items[a.itemID].farmingLevel);
+    }
+    if (bot_plant[type]["type"]==="mastery") {
+      // Default sort on mastery, highest -> lowest
+      bot_plant[type]["seeds"].sort((a, b) => farmingMastery[items[b.itemID].masteryID].masteryXP - farmingMastery[items[a.itemID].masteryID].masteryXP);
+    }
+    if (bot_plant[type]["order"]==="ascending") {
+      // Reverse the sort order if configured.
+      bot_plant[type]["seeds"].reverse();
+    }
+    return bot_findSeed(bot_plant[type]["seeds"]);
   }
 
   function bot_addCompost(area, patch) {
     let required_compost = (100 - newFarmingAreas[area].patches[patch].compost)/20;
     if (required_compost > 0) {
       let count = bot_getBankCount(CONSTANTS.item.Compost);
+      // If we have the farming skillcape, we won't buy compost
+      if (equippedItems[CONSTANTS.equipmentSlot.Cape] === CONSTANTS.item.Farming_Skillcape) {
+        count = 9999999999999;
+      // Equip the skill cape if we own it, don't change capes while in combat
+      // Only check the bank, no use in dealing with multiple equipment profiles
+      } else if (!isInCombat && getBankId(CONSTANTS.item.Farming_Skillcape) !== false) {
+        // We own the cape but don't have it equipped, store whatever we have currently equipped in the cape slot
+        equippedCape = equippedItems[CONSTANTS.equipmentSlot.Cape];
+        // Try and equip the cape. This will fail if the bank is full.
+        equipItem(getBankId(CONSTANTS.item.Farming_Skillcape), CONSTANTS.item.Farming_Skillcape, 1, selectedEquipmentSet);
+        // Stop the loop if we equipped the cape
+        return false;
+      }
+      // Do we need to buy compost?
       if (count < required_compost) {
         let to_buy = required_compost - count;
-        // try to buy compost - Do we have the gold?
         if (gp >= (items[CONSTANTS.item.Compost].buysFor * to_buy)) {
           buyCompost(to_buy);
-          // We want to stop the loop if we bought compost.
-          return true;
+          // Stop the loop if we bought compost.
+          return false;
         }
       }
+      // We can apply the compost
       if (count >= required_compost) {
-        // Apply compost
         addCompost(area, patch, required_compost);
-        // We want to stop the loop when compost is applied.
+        // Stop the loop when compost is applied.
         return true;
       }
       return false;
@@ -322,11 +351,18 @@ const bot_bigBonesReserve = 0;
           if (farmingMastery[items[seed].masteryID].mastery < 50) {
             let composted = bot_addCompost(area, patch);
             // check if the area actually got composted
-            if (composted) {
-              return true;
-            }
+            if (composted) { return true; }
           }
           bot_plantField(area, patch, seed);
+        }
+        // Nothing needs to be done, unequip the skill cape if needed.
+        if (equippedCape > 0) {
+          // Repeat until it actually worked (eg bank full)
+          if (equippedItems[CONSTANTS.equipmentSlot.Cape]===equippedCape) {
+            equippedCape = 0;
+            return true;
+          }
+          equipItem(getBankId(equippedCape), equippedCape, 1, selectedEquipmentSet);
         }
       }
     }
@@ -373,9 +409,6 @@ const bot_bigBonesReserve = 0;
   }
 
   var bot_sellList = [];
-  var bot_seedsList = [];
-  var bot_herbsList = [];
-  var bot_treeList = [];
   var bot_gemList = [128, 129, 130, 131, 132];
   var bot_bones = [
     [439, bot_bonesReserve],
@@ -389,6 +422,7 @@ const bot_bigBonesReserve = 0;
   const bot_herbsBag = 620;
   const bot_goldBag = 482;
   var botSeedStorage = {};
+  var equippedCape = 0;
 
   // Delay 10 seconds to allow the game to load.
   setTimeout(function() {
@@ -398,24 +432,14 @@ const bot_bigBonesReserve = 0;
     // Set up the farming data
     if (bot_autoFarm_enabled) {
       loadSeeds();
-      // Configure seed priority
-      bot_seedsList = [...allotmentSeeds];
-      if (bot_seeds_use_highest) {
-        bot_seedsList.reverse();
-      }
-      bot_herbsList = [...herbSeeds];
-      if (bot_herbs_use_highest) {
-        bot_herbsList.reverse();
-      }
-      bot_treeList = [...treeSeeds];
-      if (bot_trees_use_highest) {
-        bot_treeList.reverse();
-      }
+      // Store seeds internally
+      bot_plant['Allotments']['seeds'] = [...allotmentSeeds];
+      bot_plant['Herbs']['seeds'] = [...herbSeeds];
+      bot_plant['Trees']['seeds'] = [...treeSeeds];
       // Create seed choice storage
       for (let area = 0; area < newFarmingAreas.length; area++) {
         botSeedStorage[area] = {};
         for (let patch = 0; patch < newFarmingAreas[area].patches.length; patch++) {
-          // newFarmingAreas[area].patches[patch].seedID
           botSeedStorage[area][patch] = -1;
         }
       }
